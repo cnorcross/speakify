@@ -3,12 +3,11 @@ import edge_tts
 import os
 import json
 import random
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import FileResponse
-from fastapi.responses import HTMLResponse
-
+from fastapi.responses import FileResponse, HTMLResponse
+from PyPDF2 import PdfReader  # Add this import for PDF processing
 
 output = "/tmp"
 if not os.path.exists(output):
@@ -47,6 +46,33 @@ async def convert_text(request: Request, text: str = Form(...), voice: str = For
     if "error" in output_file:
         return {"error": output_file["error"]}
     return templates.TemplateResponse("index.html", {"request": request, "output_file": output_file,"voice_data": voice_data})
+
+@app.post("/convert_pdf")
+async def convert_pdf(request: Request, file: UploadFile = File(...), voice: str = Form(...)):
+    if voice not in voices:
+        return {"error": f"Voice '{voice}' not available."}
+    
+    # Save the uploaded PDF file
+    pdf_path = os.path.join(output, file.filename)
+    with open(pdf_path, "wb") as pdf_file:
+        pdf_file.write(await file.read())
+    
+    # Extract text from the PDF
+    try:
+        with open(pdf_path, "rb") as pdf_file:
+            reader = PdfReader(pdf_file)  # Use PdfReader instead of PdfFileReader
+            text = ""
+            for page in reader.pages:  # Iterate over pages directly
+                text += page.extract_text()
+    except Exception as e:
+        return {"error": f"Failed to extract text from PDF: {str(e)}"}
+    
+    # Convert extracted text to speech
+    output_file = await _convert_text_to_speech(text, voice)
+    if "error" in output_file:
+        return {"error": output_file["error"]}
+    
+    return templates.TemplateResponse("index.html", {"request": request, "output_file": output_file, "voice_data": voice_data})
 
 @app.get("/audio/{output_file}")
 async def get_audio(output_file: str):
